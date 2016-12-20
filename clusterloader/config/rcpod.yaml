@@ -1,0 +1,15 @@
+provider: local
+deletenamespace: false
+ClusterLoader:
+  projects:
+    - num: 1
+      basename: clusterproject
+      pods:
+        - num: 1
+          image: gcr.io/google_containers/resource_consumer:beta
+          basename: resourceconsumer
+          file: rc-pod.json
+          parameters:
+            run: stress
+            duration: 30
+            megabytes: 1024
