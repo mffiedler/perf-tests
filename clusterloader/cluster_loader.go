@@ -20,21 +20,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"time"
 
+	"github.com/fatih/structs"
 	clusterloaderframework "github.com/kubernetes/perf-tests/clusterloader/framework"
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	"k8s.io/kubernetes/pkg/api/v1"
-	clientset "k8s.io/kubernetes/pkg/client/clientset_generated/release_1_5"
+	metav1 "k8s.io/kubernetes/pkg/apis/meta/v1"
+	clientset "k8s.io/kubernetes/pkg/client/clientset_generated/clientset"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/test/e2e/framework"
 	testutils "k8s.io/kubernetes/test/utils"
 )
+
+type serviceInfo struct {
+	name string
+	IP   string
+	port int32
+}
 
 var _ = framework.KubeDescribe("Cluster Loader [Feature:ManualPerformance]", func() {
 	f := framework.NewDefaultFramework("cluster-loader")
@@ -48,6 +58,7 @@ var _ = framework.KubeDescribe("Cluster Loader [Feature:ManualPerformance]", fun
 	ginkgo.It(fmt.Sprintf("running config file"), func() {
 		project := clusterloaderframework.ConfigContext.ClusterLoader.Projects
 		tuningSets := clusterloaderframework.ConfigContext.ClusterLoader.TuningSets
+		var parameters clusterloaderframework.ParameterConfigType
 		if len(project) < 1 {
 			framework.Failf("invalid config file.\nFile: %v", project)
 		}
@@ -58,7 +69,9 @@ var _ = framework.KubeDescribe("Cluster Loader [Feature:ManualPerformance]", fun
 		for _, p := range project {
 			// Find tuning if we have it
 			tuning := getTuningSet(tuningSets, p.Tuning)
-			framework.Logf("Our tuning set is: %v", tuning)
+			if tuning != nil {
+				framework.Logf("Our tuning set is: %v", tuning)
+			}
 			for j := 0; j < p.Number; j++ {
 				// Create namespaces as defined in Cluster Loader config
 				nsName := appendIntToString(p.Basename, j)
@@ -73,8 +86,11 @@ var _ = framework.KubeDescribe("Cluster Loader [Feature:ManualPerformance]", fun
 				}
 				// This is too familiar, create pods
 				for _, v := range p.Pods {
+					parameters = v.Parameters
+					framework.Logf("Parameters: %+v", v.Parameters)
 					config := parsePods(mkPath(v.File))
-					clusterloaderframework.CreatePods(f, v.Basename, ns.Name, config.Spec, v.Number, tuning)
+					labels := map[string]string{"purpose": "test"}
+					clusterloaderframework.CreatePods(f, v.Basename, ns.Name, labels, config.Spec, v.Number, tuning)
 				}
 			}
 		}
@@ -89,8 +105,64 @@ var _ = framework.KubeDescribe("Cluster Loader [Feature:ManualPerformance]", fun
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			framework.Logf("All pods running in namespace %s.", ns.Name)
 		}
+
+		//getIP
+		endpoints := getPodDetailsWithLabel(f, "purpose=test")
+		//append endpoint
+		for _, endpointInfo := range endpoints {
+			endpoint := endpointInfo.IP + "/ConsumeMem"
+			//create url.Values from config
+			m := structs.Map(parameters)
+			values := url.Values{}
+			for k, v := range m {
+				if v != 0 && v != "" {
+					values.Add(k, v.(string))
+				}
+			}
+			if _, err := http.PostForm(endpoint, values); err != nil {
+				framework.Failf("HTTP request failed: %v", err)
+			}
+		}
 	})
 })
+
+func getEndpointsWithLabel(f *framework.Framework, label string) (endpointInfo []serviceInfo) {
+	selector := v1.ListOptions{LabelSelector: label}
+	endpoints, err := f.ClientSet.Core().Endpoints("").List(selector)
+	if err != nil {
+		panic(err.Error())
+	}
+	for _, v := range endpoints.Items {
+		if len(v.Subsets) > 0 {
+			for _, ep := range v.Subsets[0].Addresses {
+				end := serviceInfo{v.ObjectMeta.Name, ep.IP, v.Subsets[0].Ports[0].Port}
+				fmt.Printf("For endpoint \"%s\", the IP is %v, the port is %d\n", end.name, end.IP, end.port)
+				endpointInfo = append(endpointInfo, end)
+			}
+		}
+	}
+
+	return
+}
+
+func getPodDetailsWithLabel(f *framework.Framework, label string) (podInfo []serviceInfo) {
+	selector := v1.ListOptions{LabelSelector: label}
+	pods, err := f.ClientSet.Core().Pods("").List(selector)
+	if err != nil {
+		panic(err.Error())
+	}
+	for _, v := range pods.Items {
+		pod, err := f.ClientSet.Core().Pods(v.ObjectMeta.Namespace).Get(v.ObjectMeta.Name, metav1.GetOptions{})
+		if err != nil {
+			panic(err.Error())
+		}
+		info := serviceInfo{pod.Name, pod.Status.PodIP, pod.Spec.Containers[0].Ports[0].HostPort}
+		fmt.Printf("For pod \"%s\", the IP is %v, the port is %d\n", info.name, info.IP, info.port)
+		podInfo = append(podInfo, info)
+	}
+
+	return
+}
 
 // getTuningSet matches the name of the tuning set defined in the project and returns a pointer to the set
 func getTuningSet(tuningSets []clusterloaderframework.TuningSetType, podTuning string) (tuning *clusterloaderframework.TuningSetType) {

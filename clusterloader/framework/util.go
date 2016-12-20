@@ -27,12 +27,11 @@ import (
 const maxRetries = 5
 
 // CreatePods creates pods in user defined namspaces with user configurable tuning sets
-func CreatePods(f *framework.Framework, appName string, ns string, spec v1.PodSpec, maxCount int, tuning *TuningSetType) {
+func CreatePods(f *framework.Framework, appName string, ns string, labels map[string]string, spec v1.PodSpec, maxCount int, tuning *TuningSetType) {
 	for i := 0; i < maxCount; i++ {
 		framework.Logf("%v/%v : Creating pod", i+1, maxCount)
 		// Retry on pod creation failure
 		for retryCount := 0; retryCount < maxRetries; retryCount++ {
-			labels := map[string]string{"purpose": "test"}
 			_, err := f.ClientSet.Core().Pods(ns).Create(&v1.Pod{
 				ObjectMeta: v1.ObjectMeta{
 					Name:      fmt.Sprintf(appName+"-pod-%v", i),

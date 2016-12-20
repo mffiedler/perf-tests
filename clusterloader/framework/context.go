@@ -41,11 +41,19 @@ type ClusterLoaderType struct {
 
 // ClusterLoaderObjectType is nested object type for cluster loader struct
 type ClusterLoaderObjectType struct {
-	Total    int
-	Number   int `mapstructure:"num"`
-	Image    string
-	Basename string
-	File     string
+	Total      int
+	Number     int `mapstructure:"num"`
+	Image      string
+	Basename   string
+	File       string
+	Parameters ParameterConfigType
+}
+
+// ParameterConfigType contains config parameters for each object
+type ParameterConfigType struct {
+	Run       string
+	Duration  int
+	Megabytes int
 }
 
 // TuningSetType is nested type for controlling Cluster Loader deployment pattern
