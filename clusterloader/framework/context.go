@@ -51,9 +51,9 @@ type ClusterLoaderObjectType struct {
 
 // ParameterConfigType contains config parameters for each object
 type ParameterConfigType struct {
-	Run       string
-	Duration  int
-	Megabytes int
+	Run         string
+	DurationSec int
+	Megabytes   int
 }
 
 // TuningSetType is nested type for controlling Cluster Loader deployment pattern

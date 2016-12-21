@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+	"unicode"
 
 	"github.com/fatih/structs"
 	clusterloaderframework "github.com/kubernetes/perf-tests/clusterloader/framework"
@@ -110,21 +111,39 @@ var _ = framework.KubeDescribe("Cluster Loader [Feature:ManualPerformance]", fun
 		endpoints := getPodDetailsWithLabel(f, "purpose=test")
 		//append endpoint
 		for _, endpointInfo := range endpoints {
-			endpoint := endpointInfo.IP + "/ConsumeMem"
+			endpoint := "http://" + endpointInfo.IP + ":8080/ConsumeMem"
 			//create url.Values from config
 			m := structs.Map(parameters)
 			values := url.Values{}
 			for k, v := range m {
+				k = firstLowercase(k)
 				if v != 0 && v != "" {
-					values.Add(k, v.(string))
+					if _, ok := v.(int); ok {
+						values.Add(k, strconv.Itoa(v.(int)))
+					} else {
+						values.Add(k, v.(string))
+					}
 				}
 			}
-			if _, err := http.PostForm(endpoint, values); err != nil {
+			framework.Logf("HTTP post values: %+v", values)
+			response, err := http.PostForm(endpoint, values)
+			if err != nil {
 				framework.Failf("HTTP request failed: %v", err)
 			}
+			responseData, err := ioutil.ReadAll(response.Body)
+			if err != nil {
+				framework.Failf("Error reading HTTP response: %v", err)
+			}
+			framework.Logf("Response from server: %v", string(responseData))
 		}
 	})
 })
+
+func firstLowercase(s string) string {
+	a := []rune(s)
+	a[0] = unicode.ToLower(a[0])
+	return string(a)
+}
 
 func getEndpointsWithLabel(f *framework.Framework, label string) (endpointInfo []serviceInfo) {
 	selector := v1.ListOptions{LabelSelector: label}
