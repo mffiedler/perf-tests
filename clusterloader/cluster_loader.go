@@ -42,9 +42,9 @@ import (
 )
 
 type serviceInfo struct {
-	name string
+	Name string
 	IP   string
-	port int32
+	Port int32
 }
 
 var _ = framework.KubeDescribe("Cluster Loader [Feature:ManualPerformance]", func() {
@@ -111,7 +111,7 @@ var _ = framework.KubeDescribe("Cluster Loader [Feature:ManualPerformance]", fun
 		endpoints := getPodDetailsWithLabel(f, "purpose=test")
 		//append endpoint
 		for _, endpointInfo := range endpoints {
-			endpoint := "http://" + endpointInfo.IP + ":8080/ConsumeMem"
+			endpoint := "http://" + endpointInfo.IP + ":" + strconv.Itoa(int(endpointInfo.Port)) + "/ConsumeMem"
 			//create url.Values from config
 			m := structs.Map(parameters)
 			values := url.Values{}
@@ -155,7 +155,7 @@ func getEndpointsWithLabel(f *framework.Framework, label string) (endpointInfo [
 		if len(v.Subsets) > 0 {
 			for _, ep := range v.Subsets[0].Addresses {
 				end := serviceInfo{v.ObjectMeta.Name, ep.IP, v.Subsets[0].Ports[0].Port}
-				fmt.Printf("For endpoint \"%s\", the IP is %v, the port is %d\n", end.name, end.IP, end.port)
+				fmt.Printf("For endpoint \"%s\", the IP is %v, the port is %d\n", end.Name, end.IP, end.Port)
 				endpointInfo = append(endpointInfo, end)
 			}
 		}
@@ -175,8 +175,8 @@ func getPodDetailsWithLabel(f *framework.Framework, label string) (podInfo []ser
 		if err != nil {
 			panic(err.Error())
 		}
-		info := serviceInfo{pod.Name, pod.Status.PodIP, pod.Spec.Containers[0].Ports[0].HostPort}
-		fmt.Printf("For pod \"%s\", the IP is %v, the port is %d\n", info.name, info.IP, info.port)
+		info := serviceInfo{pod.Name, pod.Status.PodIP, pod.Spec.Containers[0].Ports[0].ContainerPort}
+		fmt.Printf("For pod \"%s\", the IP is %v, the port is %d\n", info.Name, info.IP, info.Port)
 		podInfo = append(podInfo, info)
 	}
 
