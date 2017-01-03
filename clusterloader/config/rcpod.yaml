@@ -11,5 +11,5 @@ ClusterLoader:
           file: rc-pod.json
           parameters:
             run: stress
-            duration: 30
+            duration: 66
             megabytes: 1024

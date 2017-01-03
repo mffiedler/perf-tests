@@ -52,7 +52,7 @@ type ClusterLoaderObjectType struct {
 // ParameterConfigType contains config parameters for each object
 type ParameterConfigType struct {
 	Run         string
-	DurationSec int
+	DurationSec int `mapstructure:"duration"`
 	Megabytes   int
 }
 

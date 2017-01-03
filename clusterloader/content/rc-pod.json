@@ -19,6 +19,18 @@
                         "protocol": "TCP"
                     }
                 ],
+		"env": [
+		    {
+			"name": "run"
+		    },
+		    {
+			"name": "durationSec",
+			"value": "30"
+		    },
+		    {
+			"name": "megabytes"
+		    }
+		],
                 "terminationMessagePath": "/dev/termination-log",
                 "imagePullPolicy": "IfNotPresent",
                 "capabilities": {},

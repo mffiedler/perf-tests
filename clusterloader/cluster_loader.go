@@ -20,8 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -59,7 +57,6 @@ var _ = framework.KubeDescribe("Cluster Loader [Feature:ManualPerformance]", fun
 	ginkgo.It(fmt.Sprintf("running config file"), func() {
 		project := clusterloaderframework.ConfigContext.ClusterLoader.Projects
 		tuningSets := clusterloaderframework.ConfigContext.ClusterLoader.TuningSets
-		var parameters clusterloaderframework.ParameterConfigType
 		if len(project) < 1 {
 			framework.Failf("invalid config file.\nFile: %v", project)
 		}
@@ -87,9 +84,19 @@ var _ = framework.KubeDescribe("Cluster Loader [Feature:ManualPerformance]", fun
 				}
 				// This is too familiar, create pods
 				for _, v := range p.Pods {
-					parameters = v.Parameters
-					framework.Logf("Parameters: %+v", v.Parameters)
+					// Parse Pod file into struct
 					config := parsePods(mkPath(v.File))
+					// Check if environment variables are defined in CL config
+					if v.Parameters == (clusterloaderframework.ParameterConfigType{}) {
+						framework.Logf("Pod environment variables will not be modified.")
+					} else {
+						// Override environment variables for Pod using ConfigMap
+						configMapName := injectConfigMap(f, ns.Name, v.Parameters, config)
+						// Cleanup ConfigMap at some point after the Pods are created
+						defer func() {
+							_ = f.ClientSet.Core().ConfigMaps(ns.Name).Delete(configMapName, nil)
+						}()
+					}
 					labels := map[string]string{"purpose": "test"}
 					clusterloaderframework.CreatePods(f, v.Basename, ns.Name, labels, config.Spec, v.Number, tuning)
 				}
@@ -107,35 +114,38 @@ var _ = framework.KubeDescribe("Cluster Loader [Feature:ManualPerformance]", fun
 			framework.Logf("All pods running in namespace %s.", ns.Name)
 		}
 
-		//getIP
-		endpoints := getPodDetailsWithLabel(f, "purpose=test")
-		//append endpoint
-		for _, endpointInfo := range endpoints {
-			endpoint := "http://" + endpointInfo.IP + ":" + strconv.Itoa(int(endpointInfo.Port)) + "/ConsumeMem"
-			//create url.Values from config
-			m := structs.Map(parameters)
-			values := url.Values{}
-			for k, v := range m {
-				k = firstLowercase(k)
-				if v != 0 && v != "" {
-					if _, ok := v.(int); ok {
-						values.Add(k, strconv.Itoa(v.(int)))
-					} else {
-						values.Add(k, v.(string))
-					}
-				}
-			}
-			framework.Logf("HTTP post values: %+v", values)
-			response, err := http.PostForm(endpoint, values)
-			if err != nil {
-				framework.Failf("HTTP request failed: %v", err)
-			}
-			responseData, err := ioutil.ReadAll(response.Body)
-			if err != nil {
-				framework.Failf("Error reading HTTP response: %v", err)
-			}
-			framework.Logf("Response from server: %v", string(responseData))
-		}
+		//////////////////////////
+		/// HTTP
+		//////////////////////////
+		// getIP
+		//endpoints := getPodDetailsWithLabel(f, "purpose=test")
+		////append endpoint
+		//for _, endpointInfo := range endpoints {
+		//	endpoint := "http://" + endpointInfo.IP + ":" + strconv.Itoa(int(endpointInfo.Port)) + "/ConsumeMem"
+		//	//create url.Values from config
+		//	m := structs.Map(parameters)
+		//	values := url.Values{}
+		//	for k, v := range m {
+		//		k = firstLowercase(k)
+		//		if v != 0 && v != "" {
+		//			if _, ok := v.(int); ok {
+		//				values.Add(k, strconv.Itoa(v.(int)))
+		//			} else {
+		//				values.Add(k, v.(string))
+		//			}
+		//		}
+		//	}
+		//	framework.Logf("HTTP post values: %+v", values)
+		//	response, err := http.PostForm(endpoint, values)
+		//	if err != nil {
+		//		framework.Failf("HTTP request failed: %v", err)
+		//	}
+		//	responseData, err := ioutil.ReadAll(response.Body)
+		//	if err != nil {
+		//		framework.Failf("Error reading HTTP response: %v", err)
+		//	}
+		//	framework.Logf("Response from server: %v", string(responseData))
+		//}
 	})
 })
 
@@ -145,6 +155,52 @@ func firstLowercase(s string) string {
 	return string(a)
 }
 
+func convertVariables(params clusterloaderframework.ParameterConfigType) map[string]string {
+	m := structs.Map(params)
+	values := make(map[string]string)
+	for k, v := range m {
+		k = firstLowercase(k)
+		if v != 0 && v != "" {
+			if _, ok := v.(int); ok {
+				values[k] = strconv.Itoa(v.(int))
+			} else {
+				values[k] = v.(string)
+			}
+		}
+	}
+	return values
+}
+
+func injectConfigMap(f *framework.Framework, ns string, vars clusterloaderframework.ParameterConfigType, config v1.Pod) string {
+	configMapName := ns + "-configmap"
+	configVars := convertVariables(vars)
+	configMap := newConfigMap(ns, configMapName, configVars)
+	framework.Logf("Creating configMap %v in namespace %v", configMap.Name, ns)
+	var err error
+	if configMap, err = f.ClientSet.Core().ConfigMaps(ns).Create(configMap); err != nil {
+		framework.Failf("Unable to create test configMap %s: %v", configMap.Name, err)
+	}
+
+	for i, envVar := range config.Spec.Containers[0].Env {
+		if _, ok := configVars[envVar.Name]; ok {
+			framework.Logf("Found match to replace: %+v", envVar)
+			config.Spec.Containers[0].Env[i] = v1.EnvVar{
+				Name: envVar.Name,
+				ValueFrom: &v1.EnvVarSource{
+					ConfigMapKeyRef: &v1.ConfigMapKeySelector{
+						LocalObjectReference: v1.LocalObjectReference{
+							Name: configMapName,
+						},
+						Key: envVar.Name,
+					},
+				},
+			}
+		} else {
+			framework.Logf("Environment variable %v is not defined in Pod file, skipping.", envVar.Name)
+		}
+	}
+	return configMapName
+}
 func getEndpointsWithLabel(f *framework.Framework, label string) (endpointInfo []serviceInfo) {
 	selector := v1.ListOptions{LabelSelector: label}
 	endpoints, err := f.ClientSet.Core().Endpoints("").List(selector)
@@ -277,4 +333,14 @@ func getNsCmdFlag(ns *v1.Namespace) string {
 
 func appendIntToString(s string, i int) string {
 	return s + strconv.Itoa(i)
+}
+
+func newConfigMap(ns string, name string, vars map[string]string) *v1.ConfigMap {
+	return &v1.ConfigMap{
+		ObjectMeta: v1.ObjectMeta{
+			Namespace: ns,
+			Name:      name,
+		},
+		Data: vars,
+	}
 }
